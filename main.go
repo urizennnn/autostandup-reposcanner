@@ -3,36 +3,33 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/urizennnn/autostandup-reposcanner/config"
+	"github.com/urizennnn/autostandup-reposcanner/redis"
 )
 
-var ctx = context.Background()
+var consumerName = fmt.Sprintf("%s-%d", "auto-standup-repo-scanner-1", os.Getpid())
 
 func main() {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	})
-
-	err := rdb.Set(ctx, "key", "value", 0).Err()
+	fmt.Println("Starting Repo Scanner Service...")
+	cfg, err := config.NewLoader("APP").Load()
 	if err != nil {
-		panic(err)
+		log.Fatalf("config error: %v", err)
 	}
+	_ = cfg
 
-	val, err := rdb.Get(ctx, "key").Result()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	rdb, err := redis.ConnectToRedis(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Redis connection error: %v", err)
 	}
-	fmt.Println("key", val)
-
-	val2, err := rdb.Get(ctx, "key2").Result()
-	if err == redis.Nil {
-		fmt.Println("key2 does not exist")
-	} else if err != nil {
-		panic(err)
-	} else {
-		fmt.Println("key2", val2)
+	err = redis.WatchStreams(ctx, rdb, "scan:jobs", "scanners", consumerName)
+	if err != nil && ctx.Err() == nil {
+		log.Fatalf("WatchStreams %v", err)
 	}
 }
