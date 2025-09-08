@@ -30,7 +30,7 @@ func main() {
 		log.Fatalf("Redis connection error: %v", err)
 	}
 	client :=github.CreateGithubClient([]byte(cfg.GitHubPrivateKey),"Iv23liz8OgaUIWul4HBe",84821041)
-	go github.ListCommits(client)
+	github.ListCommits(client)
 	err = redis.WatchStreams(ctx, rdb, "scan:jobs", "scanners", consumerName)
 	if err != nil && ctx.Err() == nil {
 		log.Fatalf("WatchStreams %v", err)
