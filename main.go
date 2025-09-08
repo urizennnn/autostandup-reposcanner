@@ -10,6 +10,7 @@ import (
 
 	"github.com/urizennnn/autostandup-reposcanner/config"
 	"github.com/urizennnn/autostandup-reposcanner/redis"
+	"github.com/urizennnn/autostandup-reposcanner/parser/github"
 )
 
 var consumerName = fmt.Sprintf("%s-%d", "auto-standup-repo-scanner-1", os.Getpid())
@@ -28,8 +29,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Redis connection error: %v", err)
 	}
+	client :=github.CreateGithubClient([]byte(cfg.GitHubPrivateKey),"Iv23liz8OgaUIWul4HBe",84821041)
+	go github.ListCommits(client)
 	err = redis.WatchStreams(ctx, rdb, "scan:jobs", "scanners", consumerName)
 	if err != nil && ctx.Err() == nil {
 		log.Fatalf("WatchStreams %v", err)
 	}
+	
 }

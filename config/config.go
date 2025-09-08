@@ -32,13 +32,15 @@ type Config struct {
 	// App
 	Env           string        `split_words:"true" default:"prod" validate:"oneof=dev staging prod"`
 	LogLevel      string        `split_words:"true" default:"info" validate:"oneof=debug info warn error"`
-	ShutdownGrace time.Duration `split_words:"true" default:"15s" validate:"min=1s"`
-
+	ShutdownGrace time.Duration `split_words:"true" default:"15s" validate:"gt=0"`
 
 	// Redis
 	RedisAddr     string `split_words:"true" default:"localhost:6379" validate:"required"`
 	RedisPassword string `split_words:"true" default:""`
 	RedisDB       int    `split_words:"true" default:"0" validate:"min=0"`
+
+	// GitHub
+	GitHubPrivateKey string `envconfig:"APP_GITHUB_PRIVATE_KEY" validate:"required"`
 }
 
 type Loader struct {
