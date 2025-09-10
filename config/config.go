@@ -40,7 +40,11 @@ type Config struct {
 	RedisDB       int    `split_words:"true" default:"0" validate:"min=0"`
 
 	// GitHub
-	GitHubPrivateKey string `envconfig:"APP_GITHUB_PRIVATE_KEY" validate:"required"`
+	GithubPrivateKey string `envconfig:"APP_GITHUB_PRIVATE_KEY" validate:"required"`
+	GithubClientID   string `split_words:"true" validate:"required"`
+
+	//OPENAI 
+	OpenaiApiKey string `split_words:"true" validate:"required"`
 }
 
 type Loader struct {
@@ -60,12 +64,9 @@ func NewLoader(prefix string) *Loader {
 func (l *Loader) Load() (Config, error) {
 	var cfg Config
 
-	if isDev() {
-		if err := loadDotEnv(); err != nil {
-			log.Printf("dotenv: %v", err)
-		}
+	if err := loadDotEnv(); err != nil {
+		log.Printf("dotenv: %v", err)
 	}
-
 	if err := envconfig.Process(l.Prefix, &cfg); err != nil {
 		return cfg, fmt.Errorf("env load: %w", err)
 	}
@@ -78,13 +79,8 @@ func (l *Loader) Load() (Config, error) {
 	return cfg, nil
 }
 
-func isDev() bool {
-	return strings.EqualFold(os.Getenv("APP_ENV"), "dev") ||
-		strings.EqualFold(os.Getenv("GO_ENV"), "dev")
-}
-
 func loadDotEnv() error {
-	files := []string{".env", ".env.local", ".env.dev", ".env.development"}
+	files := []string{".env"}
 
 	if appEnv := strings.TrimSpace(os.Getenv("APP_ENV")); appEnv != "" {
 		files = append(files, ".env."+appEnv)

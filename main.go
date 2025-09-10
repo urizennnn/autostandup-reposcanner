@@ -29,7 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Redis connection error: %v", err)
 	}
-	client := github.CreateGithubClient([]byte(cfg.GitHubPrivateKey), "Iv23liz8OgaUIWul4HBe", 84821041)
+	client := github.CreateGithubClient([]byte(cfg.GithubPrivateKey), "Iv23liz8OgaUIWul4HBe", 84821041)
 	sha := github.ListCommits(client)
 	for _, s := range sha {
 		github.GetCommit(client, s)
