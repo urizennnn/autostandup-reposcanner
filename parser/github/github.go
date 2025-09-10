@@ -23,8 +23,7 @@ func CreateGithubClient(privateKey []byte, clientID string, installationID int64
 	return client
 }
 
-func ListCommits(client *github.Client) []string {
-	var sha []string
+func ListCommits(client *github.Client) {
 	fmt.Printf("Fetching commits")
 	commits, _, err := client.Repositories.ListCommits(
 		context.Background(), "urizennnn", "autostandup-reposcanner", &github.CommitsListOptions{
@@ -34,10 +33,23 @@ func ListCommits(client *github.Client) []string {
 	if err != nil {
 		log.Fatalf("Error fetching commits %s", err)
 	}
-	for _, commit := range commits {
-		sha = append(sha, *commit.SHA)
+	for _, c := range commits {
+		sha := c.GetSHA()
+
+		name := c.GetCommit().GetAuthor().GetName()
+		email := c.GetCommit().GetAuthor().GetEmail()
+		if email == "" {
+			email = c.GetCommit().GetCommitter().GetEmail()
+		}
+		if name == "" {
+			name = c.GetCommit().GetCommitter().GetName()
+		}
+
+		login := c.GetAuthor().GetLogin()
+
+		fmt.Printf("\nCommit: %s by %s <%s> github:%s\n", sha, name, email, login)
+		GetCommit(client, sha)
 	}
-	return sha
 }
 
 func GetCommit(client *github.Client, sha string) *github.RepositoryCommit {
@@ -49,8 +61,6 @@ func GetCommit(client *github.Client, sha string) *github.RepositoryCommit {
 		if f == nil {
 			continue
 		}
-		// Most fields in go-github are pointers: *string, *int, etc.
-		// Check for nil before deref, or use a tiny helper to default them.
 		name := ""
 		if f.Filename != nil {
 			name = *f.Filename
