@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -13,20 +12,14 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
-type URL struct{ *url.URL }
 
-func (u *URL) UnmarshalText(b []byte) error {
-	s := strings.TrimSpace(string(b))
-	if s == "" {
-		return nil
-	}
-	parsed, err := url.Parse(s)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("invalid URL: %q", s)
-	}
-	u.URL = parsed
-	return nil
-}
+type SecretKey string
+
+const (
+	SecretGithubPrivateKey SecretKey = "APP_GITHUB_PRIVATE_KEY"
+	SecretGithubClientID   SecretKey = "GITHUB_CLIENT_ID"
+	SecretOpenAIKey        SecretKey = "OPENAI_API_KEY"
+)
 
 type Config struct {
 	// App
@@ -43,7 +36,7 @@ type Config struct {
 	GithubPrivateKey string `envconfig:"APP_GITHUB_PRIVATE_KEY" validate:"required"`
 	GithubClientID   string `split_words:"true" validate:"required"`
 
-	//OPENAI 
+	// OPENAI
 	OpenaiApiKey string `split_words:"true" validate:"required"`
 }
 
@@ -54,10 +47,6 @@ type Loader struct {
 
 func NewLoader(prefix string) *Loader {
 	v := validator.New()
-	_ = v.RegisterValidation("required_url", func(fl validator.FieldLevel) bool {
-		u, ok := fl.Field().Interface().(URL)
-		return ok && u.URL != nil && u.Scheme != "" && u.Host != ""
-	})
 	return &Loader{Prefix: prefix, Validate: v}
 }
 
@@ -75,7 +64,9 @@ func (l *Loader) Load() (Config, error) {
 		return cfg, fmt.Errorf("config validation: %w", err)
 	}
 
-	log.Printf("config: %+v", cfg)
+	log.Printf("config loaded env=%s logLevel=%s redisAddr=%s redisDB=%d",
+		cfg.Env, cfg.LogLevel, cfg.RedisAddr, cfg.RedisDB)
+
 	return cfg, nil
 }
 
@@ -93,7 +84,6 @@ func loadDotEnv() error {
 	for _, f := range files {
 		if fileExists(f) {
 			if err := godotenv.Overload(f); err != nil {
-				// Keep going; collect first error to report
 				log.Printf("dotenv: failed loading %s: %v", f, err)
 				continue
 			}
@@ -112,4 +102,14 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func fetchSecretByName(_ string) (string, error) { return "", nil }
+func fetchSecret(key SecretKey) (string, error) {
+	val := strings.TrimSpace(os.Getenv(string(key)))
+	if val == "" {
+		return "", fmt.Errorf("secret %q not found", key)
+	}
+	return val, nil
+}
+
+func FetchSecretByName(secret SecretKey) (string, error) {
+	return fetchSecret(SecretKey(secret))
+}
