@@ -74,8 +74,6 @@ func SummarizeCommits(ctx context.Context, apiKey string, job SummarizeJob) (Sta
 	sys := `You are AutoStandup's summarizer. Output ONE function call "emit_structured_standup" with JSON that matches the provided schema. 
 Shape content to three levels: 
 - technical: header, whatWorkedOn bullets, filesChanged {files, additions, deletions}, commits[] (short, conventional commit style).
-- mildlyTechnical: header, whatWorkedOn bullets, impact, focus.
-- layman: header, whatWorkedOn bullets (plain language), impact, focus.
 Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName".`
 
 	jobJSON, _ := json.Marshal(job)
@@ -194,11 +192,12 @@ Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the 
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"repo":   out.Repo,
-		"since":  out.Window.Since,
-		"until":  out.Window.Until,
+		"repo":    out.Repo,
+		"since":   out.Window.Since,
+		"until":   out.Window.Until,
 		"authors": len(out.Contributors),
 	}).Info("summarizer: structured standup ready")
+	fmt.Printf("Summarizer output: %+v\n", out)
 
 	return out, nil
 }
