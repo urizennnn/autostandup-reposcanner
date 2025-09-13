@@ -2,17 +2,27 @@ package redis
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/urizennnn/autostandup-reposcanner/ai"
 	"github.com/urizennnn/autostandup-reposcanner/config"
 
 	"github.com/urizennnn/autostandup-reposcanner/parser/github"
 )
+
+type QueueMessage struct {
+	Owner          string    `json:"owner"`
+	Repo           string    `json:"repo"`
+	From           time.Time `json:"from"`
+	To             time.Time `json:"to"`
+	InstallationID int64     `json:"installation_id"`
+	Branch         string    `json:"branch"`
+	Format         string    `json:"format"`
+}
 
 func ConnectToRedis(addr, password string, db int) (*redis.Client, error) {
 	rdb := redis.NewClient(&redis.Options{
@@ -87,9 +97,9 @@ func WatchStreams(ctx context.Context, rdb *redis.Client, stream, group, consume
 }
 
 func handleAndParseMessageEvent(msg redis.XMessage, rdb *redis.Client) error {
-	log.Printf("Processing message ID: %s, Values: %v", msg.ID, msg.Values)
+    log.Printf("Processing message ID: %s, Values: %v", msg.ID, msg.Values)
 
-	openaiKey, err := config.FetchSecretByName("APP_OPENAI_API_KEY")
+	githubPrivateKey, err := config.FetchSecretByName("APP_GITHUB_PRIVATE_KEY")
 	if err != nil {
 		fmt.Printf("An Error occured when fetching openai api key %v", err)
 	}
@@ -99,25 +109,78 @@ func handleAndParseMessageEvent(msg redis.XMessage, rdb *redis.Client) error {
 		fmt.Printf("An Error occured when fetching github client id %v", err)
 	}
 
-	owner := msg.Values["owner"].(string)
-	repo := msg.Values["repo"].(string)
-	from := msg.Values["from"].(time.Time)
-	to := msg.Values["to"].(time.Time)
-	installationID := msg.Values["installation_id"].(int64)
-	branch := msg.Values["branch"].(string)
-	format := msg.Values["format"].(string)
-
-	client := github.CreateGithubClient([]byte(openaiKey), githubClientID, installationID)
-	res, err := github.ListCommits(client, owner, repo, branch, format, from, to)
+	marshalPayload, err := extractQueuePayload(msg)
 	if err != nil {
-		fmt.Printf("Error listing commits for %s/%s: %v", owner, repo, err)
+		fmt.Printf("Error extracting queue payload: %v", err)
 	}
-	rdb.XAdd(context.Background(), &redis.XAddArgs{
-		Values: res,
-		ID:     "*",
-		Approx: true,
-		MaxLen: 1000,
-	})
+	owner := marshalPayload.Owner
+	repo := marshalPayload.Repo
+	from := marshalPayload.From
+	to := marshalPayload.To
+	installationID := marshalPayload.InstallationID
+	branch := marshalPayload.Branch
+	format := marshalPayload.Format
 
-	return nil
+	fmt.Print(installationID)
+	client := github.CreateGithubClient([]byte(githubPrivateKey), githubClientID, installationID)
+    res, err := github.ListCommits(client, owner, repo, branch, format, from, to)
+    if err != nil {
+        return fmt.Errorf("error listing commits for %s/%s: %w", owner, repo, err)
+    }
+
+    // Marshal the standup payload and publish to scan:results as a JSON string field
+    payloadBytes, err := json.Marshal(res)
+    if err != nil {
+        return fmt.Errorf("failed to marshal summary payload: %w", err)
+    }
+
+    id, err := rdb.XAdd(context.Background(), &redis.XAddArgs{
+        Stream:     "scan:results",
+        MaxLen:     1000,
+        Approx:     true,
+        ID:         "*",
+        NoMkStream: false,
+        Values: map[string]any{
+            "payload": string(payloadBytes),
+            "repo":    res.Repo,
+            "from":    from.UTC().Format(time.RFC3339),
+            "to":      to.UTC().Format(time.RFC3339),
+            "format":  format,
+        },
+    }).Result()
+    if err != nil {
+        return fmt.Errorf("failed to publish to scan:results: %w", err)
+    }
+    log.Printf("Published summary to scan:results with ID %s for %s/%s", id, owner, repo)
+
+    return nil
+}
+
+func extractQueuePayload(msg redis.XMessage) (QueueMessage, error) {
+	v, ok := msg.Values["queuePayload"]
+	if !ok || v == nil {
+		return QueueMessage{}, fmt.Errorf("missing queuePayload")
+	}
+
+	var b []byte
+	switch t := v.(type) {
+	case string:
+		b = []byte(t)
+	case []byte:
+		b = t
+	case map[string]any:
+		var err error
+		b, err = json.Marshal(t)
+		if err != nil {
+			return QueueMessage{}, err
+		}
+	default:
+		return QueueMessage{}, fmt.Errorf("unexpected type for queuePayload: %T", v)
+	}
+
+	var p QueueMessage
+	if err := json.Unmarshal(b, &p); err != nil {
+		return QueueMessage{}, err
+	}
+	return p, nil
 }

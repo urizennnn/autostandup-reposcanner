@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v74/github"
@@ -14,6 +15,8 @@ import (
 )
 
 func CreateGithubClient(privateKey []byte, clientID string, installationID int64) *github.Client {
+	fmt.Printf("Creating github client\n")
+	fmt.Printf("Using installation ID: %d\n", installationID)
 	appTokenSource, err := githubauth.NewApplicationTokenSource(clientID, privateKey)
 	if err != nil {
 		log.Fatalf("An Error occured when creating github client %v", err)
@@ -87,8 +90,8 @@ func ListCommits(client *github.Client, owner, repo, branch, format string, sinc
 	}
 
 	var res any
-	switch format {
-	case "technical":
+	switch strings.ToUpper(strings.ReplaceAll(format, "-", "_")) {
+	case "TECHNICAL":
 		res, err := ai.SummarizeTechinicalCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
 			Repo:        owner + "/" + repo,
 			ProjectName: repo,
@@ -96,12 +99,13 @@ func ListCommits(client *github.Client, owner, repo, branch, format string, sinc
 			Since:       since.UTC(),
 			Until:       until.UTC(),
 			Commits:     aiCommits,
-		}, "techical")
+		}, "technical")
 		if err != nil {
 			log.Printf("summarize error: %v", err)
 		}
 		return res, nil
-	case "midlytechnical":
+
+	case "MILDLY_TECHNICAL":
 		res, err := ai.SummarizeMildlyTechnicalCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
 			Repo:        owner + "/" + repo,
 			ProjectName: repo,
@@ -109,12 +113,13 @@ func ListCommits(client *github.Client, owner, repo, branch, format string, sinc
 			Since:       since.UTC(),
 			Until:       until.UTC(),
 			Commits:     aiCommits,
-		}, "techical")
+		}, "mildly_technical")
 		if err != nil {
 			log.Printf("summarize error: %v", err)
 		}
 		return res, nil
-	case "layman":
+
+	case "LAYMAN":
 		res, err := ai.SummarizeLaymanCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
 			Repo:        owner + "/" + repo,
 			ProjectName: repo,
@@ -122,12 +127,13 @@ func ListCommits(client *github.Client, owner, repo, branch, format string, sinc
 			Since:       since.UTC(),
 			Until:       until.UTC(),
 			Commits:     aiCommits,
-		}, "techical")
+		}, "layman")
 		if err != nil {
 			log.Printf("summarize error: %v", err)
 		}
 		return res, nil
-
+	default:
+		fmt.Printf("Unknown format: %s, defaulting to TECHNICAL\n", format)
 	}
 	fmt.Printf("\nSummary:\n%s\n", res)
 	return ai.StandupPayload{}, nil
