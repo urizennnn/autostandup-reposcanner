@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/urizennnn/autostandup-reposcanner/config"
-	"github.com/urizennnn/autostandup-reposcanner/parser/github"
 	"github.com/urizennnn/autostandup-reposcanner/redis"
 )
 
@@ -29,8 +28,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Redis connection error: %v", err)
 	}
-	client := github.CreateGithubClient([]byte(cfg.GithubPrivateKey), "Iv23liz8OgaUIWul4HBe", 84821041)
-	github.ListCommits(client)
 	err = redis.WatchStreams(ctx, rdb, "scan:jobs", "scanners", consumerName)
 	if err != nil && ctx.Err() == nil {
 		log.Fatalf("WatchStreams %v", err)

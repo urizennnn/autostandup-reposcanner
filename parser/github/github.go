@@ -25,17 +25,13 @@ func CreateGithubClient(privateKey []byte, clientID string, installationID int64
 	return client
 }
 
-func ListCommits(client *github.Client) {
-	owner := "urizennnn"
-	repo := "autostandup-reposcanner"
-	since := time.Now().AddDate(0, 0, -1)
-	until := time.Now()
-
+func ListCommits(client *github.Client, owner, repo, branch, format string, since, until time.Time) (ai.StandupPayload, error) {
 	fmt.Printf("Fetching commits")
 	commits, _, err := client.Repositories.ListCommits(
 		context.Background(), owner, repo, &github.CommitsListOptions{
 			Since: since,
 			Until: until,
+			SHA:   branch,
 		})
 	if err != nil {
 		log.Fatalf("Error fetching commits %s", err)
@@ -82,7 +78,7 @@ func ListCommits(client *github.Client) {
 
 	if len(aiCommits) == 0 {
 		fmt.Println("\nNo commits to summarize")
-		return
+		return ai.StandupPayload{}, nil
 	}
 
 	openaiAPIKey, err := config.FetchSecretByName("APP_OPENAI_API_KEY")
@@ -90,17 +86,51 @@ func ListCommits(client *github.Client) {
 		log.Fatalf("An Error occured when fetching openai api key %v", err)
 	}
 
-	_, err = ai.SummarizeCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
-		Repo:        owner + "/" + repo,
-		ProjectName: repo,
-		Handle:      owner,
-		Since:       since.UTC(),
-		Until:       until.UTC(),
-		Commits:     aiCommits,
-	})
-	if err != nil {
-		log.Printf("summarize error: %v", err)
+	var res any
+	switch format {
+	case "technical":
+		res, err := ai.SummarizeTechinicalCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
+			Repo:        owner + "/" + repo,
+			ProjectName: repo,
+			Handle:      owner,
+			Since:       since.UTC(),
+			Until:       until.UTC(),
+			Commits:     aiCommits,
+		}, "techical")
+		if err != nil {
+			log.Printf("summarize error: %v", err)
+		}
+		return res, nil
+	case "midlytechnical":
+		res, err := ai.SummarizeMildlyTechnicalCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
+			Repo:        owner + "/" + repo,
+			ProjectName: repo,
+			Handle:      owner,
+			Since:       since.UTC(),
+			Until:       until.UTC(),
+			Commits:     aiCommits,
+		}, "techical")
+		if err != nil {
+			log.Printf("summarize error: %v", err)
+		}
+		return res, nil
+	case "layman":
+		res, err := ai.SummarizeLaymanCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
+			Repo:        owner + "/" + repo,
+			ProjectName: repo,
+			Handle:      owner,
+			Since:       since.UTC(),
+			Until:       until.UTC(),
+			Commits:     aiCommits,
+		}, "techical")
+		if err != nil {
+			log.Printf("summarize error: %v", err)
+		}
+		return res, nil
+
 	}
+	fmt.Printf("\nSummary:\n%s\n", res)
+	return ai.StandupPayload{}, nil
 }
 
 func GetCommitStats(client *github.Client, owner, repo, sha string) (files int, additions int, deletions int, err error) {

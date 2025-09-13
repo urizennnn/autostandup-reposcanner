@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/urizennnn/autostandup-reposcanner/ai"
+	"github.com/urizennnn/autostandup-reposcanner/config"
+
+	"github.com/urizennnn/autostandup-reposcanner/parser/github"
 )
 
 func ConnectToRedis(addr, password string, db int) (*redis.Client, error) {
@@ -68,10 +72,11 @@ func WatchStreams(ctx context.Context, rdb *redis.Client, stream, group, consume
 		}
 		for _, incomingStream := range res {
 			for _, msg := range incomingStream.Messages {
-				if err := handleAndParseMessageEvent(msg); err != nil {
+				if err := handleAndParseMessageEvent(msg, rdb); err != nil {
 					log.Printf("Error handling message %s: %v", msg.ID, err)
 					continue
 				}
+
 				if err := rdb.XAck(ctx, stream, group, msg.ID).Err(); err != nil {
 					log.Printf("Error acknowledging message %s: %v", msg.ID, err)
 				}
@@ -81,7 +86,38 @@ func WatchStreams(ctx context.Context, rdb *redis.Client, stream, group, consume
 	}
 }
 
-func handleAndParseMessageEvent(msg redis.XMessage) error {
+func handleAndParseMessageEvent(msg redis.XMessage, rdb *redis.Client) error {
 	log.Printf("Processing message ID: %s, Values: %v", msg.ID, msg.Values)
+
+	openaiKey, err := config.FetchSecretByName("APP_OPENAI_API_KEY")
+	if err != nil {
+		fmt.Printf("An Error occured when fetching openai api key %v", err)
+	}
+
+	githubClientID, err := config.FetchSecretByName("APP_GITHUB_CLIENT_ID")
+	if err != nil {
+		fmt.Printf("An Error occured when fetching github client id %v", err)
+	}
+
+	owner := msg.Values["owner"].(string)
+	repo := msg.Values["repo"].(string)
+	from := msg.Values["from"].(time.Time)
+	to := msg.Values["to"].(time.Time)
+	installationID := msg.Values["installation_id"].(int64)
+	branch := msg.Values["branch"].(string)
+	format := msg.Values["format"].(string)
+
+	client := github.CreateGithubClient([]byte(openaiKey), githubClientID, installationID)
+	res, err := github.ListCommits(client, owner, repo, branch, format, from, to)
+	if err != nil {
+		fmt.Printf("Error listing commits for %s/%s: %v", owner, repo, err)
+	}
+	rdb.XAdd(context.Background(), &redis.XAddArgs{
+		Values: res,
+		ID:     "*",
+		Approx: true,
+		MaxLen: 1000,
+	})
+
 	return nil
 }
