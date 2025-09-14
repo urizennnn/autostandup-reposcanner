@@ -28,9 +28,11 @@ type Config struct {
 	ShutdownGrace time.Duration `split_words:"true" default:"15s" validate:"gt=0"`
 
 	// Redis
+	RedisURL      string `split_words:"true" default:""`
 	RedisAddr     string `split_words:"true" default:"localhost:6379" validate:"required"`
 	RedisPassword string `split_words:"true" default:""`
 	RedisDB       int    `split_words:"true" default:"0" validate:"min=0"`
+	RedisUseTLS   bool   `split_words:"true" default:"false"`
 
 	// GitHub
 	GithubPrivateKey string `envconfig:"APP_GITHUB_PRIVATE_KEY" validate:"required"`

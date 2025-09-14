@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"strings"
@@ -24,12 +25,16 @@ type QueueMessage struct {
 	Format         string    `json:"format"`
 }
 
-func ConnectToRedis(addr, password string, db int) (*redis.Client, error) {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
-	})
+func ConnectToRedis(addr, password string, db int, useTLS bool) (*redis.Client, error) {
+    opts := &redis.Options{
+        Addr:     addr,
+        Password: password,
+        DB:       db,
+    }
+    if useTLS {
+        opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+    }
+    rdb := redis.NewClient(opts)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -47,6 +52,34 @@ func ConnectToRedis(addr, password string, db int) (*redis.Client, error) {
 	}
 
 	return rdb, nil
+}
+
+// ConnectToRedisURL parses a redis URL and connects.
+// Supports schemes:
+// - redis:// (no TLS)
+// - rediss:// (TLS enabled)
+func ConnectToRedisURL(url string) (*redis.Client, error) {
+    opts, err := redis.ParseURL(url)
+    if err != nil {
+        return nil, fmt.Errorf("invalid redis url: %w", err)
+    }
+    rdb := redis.NewClient(opts)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+    defer cancel()
+    if err := rdb.Ping(ctx).Err(); err != nil {
+        _ = rdb.Close()
+        return nil, fmt.Errorf("redis ping failed: %w", err)
+    }
+
+    if err := rdb.
+        XGroupCreateMkStream(ctx, "scan:results", "workers", "$").
+        Err(); err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+        _ = rdb.Close()
+        return nil, fmt.Errorf("xgroup create scan:results/workers: %w", err)
+    }
+
+    return rdb, nil
 }
 
 func WatchStreams(ctx context.Context, rdb *redis.Client, stream, group, consumer string) error {

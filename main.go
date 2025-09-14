@@ -12,6 +12,7 @@ import (
 
     "github.com/urizennnn/autostandup-reposcanner/config"
     "github.com/urizennnn/autostandup-reposcanner/redis"
+    goredis "github.com/redis/go-redis/v9"
 )
 
 var consumerName = fmt.Sprintf("%s-%d", "auto-standup-repo-scanner-1", os.Getpid())
@@ -56,11 +57,16 @@ func main() {
             log.Printf("http server shutdown error: %v", err)
         }
     }()
-	rdb, err := redis.ConnectToRedis(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
-	if err != nil {
-		log.Fatalf("Redis connection error: %v", err)
-	}
-	err = redis.WatchStreams(ctx, rdb, "scan:jobs", "scanners", consumerName)
+    var rdbClient *goredis.Client
+    if cfg.RedisURL != "" {
+        rdbClient, err = redis.ConnectToRedisURL(cfg.RedisURL)
+    } else {
+        rdbClient, err = redis.ConnectToRedis(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.RedisUseTLS)
+    }
+    if err != nil {
+        log.Fatalf("Redis connection error: %v", err)
+    }
+    err = redis.WatchStreams(ctx, rdbClient, "scan:jobs", "scanners", consumerName)
 	if err != nil && ctx.Err() == nil {
 		log.Fatalf("WatchStreams %v", err)
 	}
