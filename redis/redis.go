@@ -54,10 +54,6 @@ func ConnectToRedis(addr, password string, db int, useTLS bool) (*redis.Client, 
 	return rdb, nil
 }
 
-// ConnectToRedisURL parses a redis URL and connects.
-// Supports schemes:
-// - redis:// (no TLS)
-// - rediss:// (TLS enabled)
 func ConnectToRedisURL(url string) (*redis.Client, error) {
     opts, err := redis.ParseURL(url)
     if err != nil {

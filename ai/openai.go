@@ -75,7 +75,8 @@ func SummarizeTechinicalCommits(ctx context.Context, apiKey string, job Summariz
 Shape content technical level: 
 - technical: header, whatWorkedOn bullets, filesChanged {files, additions, deletions}, commits[] (short, conventional commit style).
 	technical should be on the same understanding level as a software engineer it should contain the changes made and how it affected the codebase in regards to improvement and efficieny.
-Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName".`
+Convert time stamps into human readable dates.
+Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName and separate the commits summary for the different contributors".`
 
 	jobJSON, _ := json.Marshal(job)
 
@@ -114,6 +115,15 @@ Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the 
 						"commits": map[string]any{
 							"type":  "array",
 							"items": map[string]any{"type": "string"},
+						},
+					},
+					"changes": map[string]any{
+						"type": "object",
+						"items": map[string]any{
+							"Code lines Added":        map[string]any{"type": "integer"},
+							"Code lines Deleted":      map[string]any{"type": "integer"},
+							"Code characters added":   map[string]any{"type": "integer"},
+							"Code characters deleted": map[string]any{"type": "integer"},
 						},
 					},
 					// Allow omitting empty arrays by not requiring them
@@ -185,6 +195,7 @@ func SummarizeMildlyTechnicalCommits(ctx context.Context, apiKey string, job Sum
 
 	sys := `You are AutoStandup's summarizer. Output ONE function call "emit_structured_standup" with JSON that matches the provided schema.
 Shape content mildly-technical level only:
+	Convert time stamps into human readable dates.
 - mildlyTechnical: header, whatWorkedOn bullets, impact, focus.
 Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName".`
 
@@ -228,6 +239,15 @@ Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the 
 							"commits": map[string]any{"type": "integer"},
 						},
 						"required": []string{"name", "commits"},
+					},
+				},
+				"changes": map[string]any{
+					"type": "object",
+					"items": map[string]any{
+						"Code lines Added":        map[string]any{"type": "integer"},
+						"Code lines Deleted":      map[string]any{"type": "integer"},
+						"Code characters added":   map[string]any{"type": "integer"},
+						"Code characters deleted": map[string]any{"type": "integer"},
 					},
 				},
 			},
@@ -283,6 +303,8 @@ func SummarizeLaymanCommits(ctx context.Context, apiKey string, job SummarizeJob
 
 	sys := `You are AutoStandup's summarizer. Output ONE function call "emit_structured_standup" with JSON that matches the provided schema.
 Shape content layman level only:
+	Convert time stamps into human readable dates.
+
 - layman: header, whatWorkedOn bullets (plain language), impact, focus.
 Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName".`
 
@@ -326,6 +348,15 @@ Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the 
 							"commits": map[string]any{"type": "integer"},
 						},
 						"required": []string{"name", "commits"},
+					},
+				},
+				"changes": map[string]any{
+					"type": "object",
+					"items": map[string]any{
+						"Code lines Added":        map[string]any{"type": "integer"},
+						"Code lines Deleted":      map[string]any{"type": "integer"},
+						"Code characters added":   map[string]any{"type": "integer"},
+						"Code characters deleted": map[string]any{"type": "integer"},
 					},
 				},
 			},

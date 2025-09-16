@@ -41,7 +41,7 @@ func main() {
         })
     })
 
-    httpSrv := &http.Server{Addr: ":8080", Handler: mux}
+    httpSrv := &http.Server{Addr: ":3000", Handler: mux}
     go func() {
         log.Printf("http server listening on %s", httpSrv.Addr)
         if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
