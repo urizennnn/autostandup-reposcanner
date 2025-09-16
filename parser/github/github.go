@@ -1,3 +1,4 @@
+// /Package github
 package github
 
 import (
