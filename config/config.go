@@ -12,7 +12,6 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
-
 type SecretKey string
 
 const (
@@ -28,11 +27,7 @@ type Config struct {
 	ShutdownGrace time.Duration `split_words:"true" default:"15s" validate:"gt=0"`
 
 	// Redis
-	RedisURL      string `split_words:"true" default:""`
-	RedisAddr     string `split_words:"true" default:"localhost:6379" validate:"required"`
-	RedisPassword string `split_words:"true" default:""`
-	RedisDB       int    `split_words:"true" default:"0" validate:"min=0"`
-	RedisUseTLS   bool   `split_words:"true" default:"false"`
+	RedisURL string `split_words:"true" validate:"required"`
 
 	// GitHub
 	GithubPrivateKey string `envconfig:"APP_GITHUB_PRIVATE_KEY" validate:"required"`
@@ -66,8 +61,8 @@ func (l *Loader) Load() (Config, error) {
 		return cfg, fmt.Errorf("config validation: %w", err)
 	}
 
-	log.Printf("config loaded env=%s logLevel=%s redisAddr=%s redisDB=%d",
-		cfg.Env, cfg.LogLevel, cfg.RedisAddr, cfg.RedisDB)
+	log.Printf("config loaded env=%s logLevel=%s redisURL_set=%t",
+		cfg.Env, cfg.LogLevel, cfg.RedisURL != "")
 
 	return cfg, nil
 }
