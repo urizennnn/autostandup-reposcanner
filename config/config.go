@@ -108,5 +108,15 @@ func fetchSecret(key SecretKey) (string, error) {
 }
 
 func FetchSecretByName(secret SecretKey) (string, error) {
-	return fetchSecret(SecretKey(secret))
+	val, err := fetchSecret(SecretKey(secret))
+	if err != nil {
+		return "", err
+	}
+
+	// Convert literal \n to actual newlines for private keys
+	if secret == "APP_GITHUB_PRIVATE_KEY" {
+		val = strings.ReplaceAll(val, "\\n", "\n")
+	}
+
+	return val, nil
 }
