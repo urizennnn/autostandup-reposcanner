@@ -49,6 +49,7 @@ func ConnectToRedisURL(url string) (*redis.Client, error) {
 }
 
 func WatchStreams(ctx context.Context, rdb *redis.Client, stream, group, consumer string) error {
+	log.Printf("Starting to watch stream %s with group %s and consumer %s", stream, group, consumer)
 	backoff := 100 * time.Millisecond
 	for {
 		if ctx.Err() != nil {
