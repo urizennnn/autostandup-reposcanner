@@ -1,4 +1,3 @@
-// /Package github
 package github
 
 import (
@@ -11,147 +10,186 @@ import (
 	"github.com/google/go-github/v74/github"
 	"github.com/jferrl/go-githubauth"
 	"github.com/urizennnn/autostandup-reposcanner/ai"
+	"github.com/urizennnn/autostandup-reposcanner/cache"
 	"github.com/urizennnn/autostandup-reposcanner/config"
+	"github.com/urizennnn/autostandup-reposcanner/ratelimit"
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/errgroup"
 )
 
-func CreateGithubClient(privateKey []byte, clientID string, installationID int64) *github.Client {
-	fmt.Printf("Creating github client\n")
-	fmt.Printf("Using installation ID: %d\n", installationID)
-	appTokenSource, err := githubauth.NewApplicationTokenSource(clientID, privateKey)
-	if err != nil {
-		log.Fatalf("An Error occured when creating github client %v", err)
-		return nil
-	}
-	installationTokenSource := githubauth.NewInstallationTokenSource(installationID, appTokenSource)
-	httpClient := *oauth2.NewClient(context.Background(), installationTokenSource)
-	client := github.NewClient(&httpClient)
-	return client
+type Client struct {
+	gh      *github.Client
+	limiter *ratelimit.Limiter
+	cache   *cache.Cache
+	config  *config.Config
 }
 
-func ListCommits(client *github.Client, owner, repo, branch, format string, since, until time.Time) (ai.StandupPayload, error) {
-	fmt.Printf("Fetching commits")
-	commits, _, err := client.Repositories.ListCommits(
-		context.Background(), owner, repo, &github.CommitsListOptions{
+func NewClient(cfg *config.Config, privateKey []byte, clientID string, installationID int64) (*Client, error) {
+	limiter := ratelimit.New(cfg.GithubRateLimit, cfg.OpenaiRateLimit)
+	c, err := cache.New(cfg.CacheSize)
+	if err != nil {
+		return nil, fmt.Errorf("creating cache: %w", err)
+	}
+
+	ghClient, err := createGithubClient(privateKey, clientID, installationID, cfg.HTTPClientTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Client{
+		gh:      ghClient,
+		limiter: limiter,
+		cache:   c,
+		config:  cfg,
+	}, nil
+}
+
+func createGithubClient(privateKey []byte, clientID string, installationID int64, timeout time.Duration) (*github.Client, error) {
+	log.Printf("[INFO] creating github client for installation %d", installationID)
+	appTokenSource, err := githubauth.NewApplicationTokenSource(clientID, privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("creating github client: %w", err)
+	}
+	installationTokenSource := githubauth.NewInstallationTokenSource(installationID, appTokenSource)
+
+	baseClient := oauth2.NewClient(context.Background(), installationTokenSource)
+	baseClient.Timeout = timeout
+
+	client := github.NewClient(baseClient)
+	return client, nil
+}
+
+func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format string, since, until time.Time) (ai.StandupPayload, error) {
+	log.Printf("[INFO] fetching commits %s/%s branch=%s", owner, repo, branch)
+	commits, _, err := c.gh.Repositories.ListCommits(
+		ctx, owner, repo, &github.CommitsListOptions{
 			Since: since,
 			Until: until,
 			SHA:   branch,
 		})
 	if err != nil {
-		log.Fatalf("Error fetching commits %s", err)
+		return ai.StandupPayload{}, fmt.Errorf("fetching commits: %w", err)
 	}
 
-	aiCommits := make([]ai.Commit, 0, len(commits))
+	if len(commits) == 0 {
+		log.Printf("[INFO] no commits found %s/%s", owner, repo)
+		return ai.StandupPayload{}, nil
+	}
 
-	for _, c := range commits {
-		if c == nil {
+	results := make([]ai.Commit, len(commits))
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(c.config.GithubConcurrency)
+
+	for i, commit := range commits {
+		if commit == nil {
 			continue
 		}
-		sha := c.GetSHA()
+		i, commit := i, commit
+		g.Go(func() error {
+			sha := commit.GetSHA()
+			name := commit.GetCommit().GetAuthor().GetName()
+			email := commit.GetCommit().GetAuthor().GetEmail()
+			if email == "" {
+				email = commit.GetCommit().GetCommitter().GetEmail()
+			}
+			if name == "" {
+				name = commit.GetCommit().GetCommitter().GetName()
+			}
+			msg := commit.GetCommit().GetMessage()
 
-		name := c.GetCommit().GetAuthor().GetName()
-		email := c.GetCommit().GetAuthor().GetEmail()
-		if email == "" {
-			email = c.GetCommit().GetCommitter().GetEmail()
-		}
-		if name == "" {
-			name = c.GetCommit().GetCommitter().GetName()
-		}
+			files, adds, dels, err := c.getCommitStats(ctx, owner, repo, sha)
+			if err != nil {
+				log.Printf("[WARN] commit stats error %s: %v", sha, err)
+				return nil
+			}
 
-		login := c.GetAuthor().GetLogin()
-		msg := c.GetCommit().GetMessage()
-
-		files, adds, dels, err := GetCommitStats(client, owner, repo, sha)
-		if err != nil {
-			log.Printf("Error fetching commit stats for %s: %v", sha, err)
-			continue
-		}
-
-		fmt.Printf("\nCommit: %s by %s <%s> github:%s files:%d +%d/-%d\n", sha, name, email, login, files, adds, dels)
-
-		aiCommits = append(aiCommits, ai.Commit{
-			SHA:         sha,
-			AuthorName:  name,
-			AuthorEmail: email,
-			Message:     msg,
-			Files:       files,
-			Additions:   adds,
-			Deletions:   dels,
+			results[i] = ai.Commit{
+				SHA:         sha,
+				AuthorName:  name,
+				AuthorEmail: email,
+				Message:     msg,
+				Files:       files,
+				Additions:   adds,
+				Deletions:   dels,
+			}
+			return nil
 		})
 	}
 
-	if len(aiCommits) == 0 {
-		fmt.Println("\nNo commits to summarize")
-		return ai.StandupPayload{}, nil
+	if err := g.Wait(); err != nil {
+		return ai.StandupPayload{}, err
+	}
+
+	aiCommits := make([]ai.Commit, 0, len(results))
+	for _, r := range results {
+		if r.SHA != "" {
+			aiCommits = append(aiCommits, r)
+		}
 	}
 
 	openaiAPIKey, err := config.FetchSecretByName("APP_OPENAI_API_KEY")
 	if err != nil {
-		log.Fatalf("An Error occured when fetching openai api key %v", err)
+		return ai.StandupPayload{}, fmt.Errorf("fetching openai api key: %w", err)
 	}
 
-	var res any
+	job := ai.SummarizeJob{
+		Repo:        owner + "/" + repo,
+		ProjectName: repo,
+		Handle:      owner,
+		Since:       since.UTC(),
+		Until:       until.UTC(),
+		Commits:     aiCommits,
+	}
+
+	var formatType ai.FormatType
 	switch strings.ToUpper(strings.ReplaceAll(format, "-", "_")) {
 	case "TECHNICAL":
-		res, err := ai.SummarizeTechinicalCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
-			Repo:        owner + "/" + repo,
-			ProjectName: repo,
-			Handle:      owner,
-			Since:       since.UTC(),
-			Until:       until.UTC(),
-			Commits:     aiCommits,
-		}, "technical")
-		if err != nil {
-			log.Printf("summarize error: %v", err)
-		}
-		return res, nil
-
+		formatType = ai.FormatTechnical
 	case "MILDLY_TECHNICAL":
-		res, err := ai.SummarizeMildlyTechnicalCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
-			Repo:        owner + "/" + repo,
-			ProjectName: repo,
-			Handle:      owner,
-			Since:       since.UTC(),
-			Until:       until.UTC(),
-			Commits:     aiCommits,
-		}, "mildly_technical")
-		if err != nil {
-			log.Printf("summarize error: %v", err)
-		}
-		return res, nil
-
+		formatType = ai.FormatMildlyTechnical
 	case "LAYMAN":
-		res, err := ai.SummarizeLaymanCommits(context.TODO(), openaiAPIKey, ai.SummarizeJob{
-			Repo:        owner + "/" + repo,
-			ProjectName: repo,
-			Handle:      owner,
-			Since:       since.UTC(),
-			Until:       until.UTC(),
-			Commits:     aiCommits,
-		}, "layman")
-		if err != nil {
-			log.Printf("summarize error: %v", err)
-		}
-		return res, nil
+		formatType = ai.FormatLayman
 	default:
-		fmt.Printf("Unknown format: %s, defaulting to TECHNICAL\n", format)
+		log.Printf("[WARN] unknown format: %s, defaulting to technical", format)
+		formatType = ai.FormatTechnical
 	}
-	fmt.Printf("\nSummary:\n%s\n", res)
-	return ai.StandupPayload{}, nil
+
+	return ai.Summarize(ctx, openaiAPIKey, job, formatType)
 }
 
-func GetCommitStats(client *github.Client, owner, repo, sha string) (files int, additions int, deletions int, err error) {
-	commit, _, err := client.Repositories.GetCommit(context.Background(), owner, repo, sha, &github.ListOptions{})
+type commitStats struct {
+	Files     int
+	Additions int
+	Deletions int
+}
+
+func (c *Client) getCommitStats(ctx context.Context, owner, repo, sha string) (files int, additions int, deletions int, err error) {
+	cacheKey := fmt.Sprintf("commit:%s:%s:%s", owner, repo, sha)
+
+	if cached, ok := c.cache.Get(cacheKey); ok {
+		stats := cached.(commitStats)
+		return stats.Files, stats.Additions, stats.Deletions, nil
+	}
+
+	if err := c.limiter.WaitGithub(ctx); err != nil {
+		return 0, 0, 0, err
+	}
+
+	commit, _, err := c.gh.Repositories.GetCommit(ctx, owner, repo, sha, &github.ListOptions{})
 	if err != nil {
 		return 0, 0, 0, err
 	}
+
+	var stats commitStats
 	for _, f := range commit.Files {
 		if f == nil {
 			continue
 		}
-		files++
-		additions += f.GetAdditions()
-		deletions += f.GetDeletions()
+		stats.Files++
+		stats.Additions += f.GetAdditions()
+		stats.Deletions += f.GetDeletions()
 	}
-	return files, additions, deletions, nil
+
+	c.cache.Set(cacheKey, stats, time.Hour)
+	return stats.Files, stats.Additions, stats.Deletions, nil
 }

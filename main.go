@@ -15,19 +15,19 @@ import (
 var consumerName = fmt.Sprintf("%s-%d", "auto-standup-repo-scanner-1", os.Getpid())
 
 func main() {
-	fmt.Println("Starting Repo Scanner Service...")
+	log.Printf("[INFO] starting repo scanner service")
 	cfg, err := config.NewLoader("APP").Load()
 	if err != nil {
-		log.Fatalf("config error: %v", err)
+		log.Fatalf("[FATAL] config error: %v", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	rdbClient, err := redis.ConnectToRedisURL(cfg.RedisURL)
+	rdbClient, err := redis.ConnectToRedisURL(cfg.RedisURL, cfg.RedisConnTimeout)
 	if err != nil {
-		log.Fatalf("Redis connection error: %v", err)
+		log.Fatalf("[FATAL] redis connection: %v", err)
 	}
-	err = redis.WatchStreams(ctx, rdbClient, "scan:jobs", "scanners", consumerName)
+	err = redis.WatchStreams(ctx, rdbClient, "scan:jobs", "scanners", consumerName, &cfg)
 	if err != nil && ctx.Err() == nil {
-		log.Fatalf("WatchStreams %v", err)
+		log.Fatalf("[FATAL] watch streams: %v", err)
 	}
 }

@@ -5,13 +5,15 @@ go 1.25
 require (
 	github.com/go-playground/validator/v10 v10.27.0
 	github.com/google/go-github/v74 v74.0.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jferrl/go-githubauth v1.4.0
 	github.com/joho/godotenv v1.5.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/openai/openai-go/v2 v2.4.1
 	github.com/redis/go-redis/v9 v9.12.1
-	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/oauth2 v0.30.0
+	golang.org/x/sync v0.19.0
+	golang.org/x/time v0.14.0
 )
 
 require (
