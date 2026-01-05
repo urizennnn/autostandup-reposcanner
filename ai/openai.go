@@ -279,11 +279,17 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 func pruneOutput(out *StandupPayload, format FormatType) {
 	switch format {
 	case FormatTechnical:
+		out.MildlyTechnical = SummaryLevel{}
+		out.Layman = SummaryLevel{}
 		out.Technical.WhatWorkedOn = pruneEmpty(out.Technical.WhatWorkedOn)
 		out.Technical.Commits = pruneEmpty(out.Technical.Commits)
 	case FormatMildlyTechnical:
+		out.Technical = TechnicalLevel{}
+		out.Layman = SummaryLevel{}
 		out.MildlyTechnical.WhatWorkedOn = pruneEmpty(out.MildlyTechnical.WhatWorkedOn)
 	case FormatLayman:
+		out.Technical = TechnicalLevel{}
+		out.MildlyTechnical = SummaryLevel{}
 		out.Layman.WhatWorkedOn = pruneEmpty(out.Layman.WhatWorkedOn)
 	}
 }
