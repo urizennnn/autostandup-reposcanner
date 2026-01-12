@@ -58,6 +58,7 @@ type SummaryLevel struct {
 
 type StandupPayload struct {
 	Repo   string `json:"repo"`
+	Title  string `json:"title"`
 	Window struct {
 		Since string `json:"since"`
 		Until string `json:"until"`
@@ -100,14 +101,17 @@ func Summarize(ctx context.Context, apiKey string, job SummarizeJob, format Form
 		Tools: []openai.ChatCompletionToolUnionParam{tool},
 	}
 
-	resp, err := client.Chat.Completions.New(ctx, params)
+	chatCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	resp, err := client.Chat.Completions.New(chatCtx, params)
 	if err != nil {
+		log.Printf("[ERROR] chat completion error: %v", err)
 		return StandupPayload{}, err
 	}
 	if len(resp.Choices) == 0 || len(resp.Choices[0].Message.ToolCalls) == 0 {
 		return StandupPayload{}, fmt.Errorf("model did not return tool call")
 	}
-
 	var out StandupPayload
 	for _, tc := range resp.Choices[0].Message.ToolCalls {
 		if tc.Function.Name == "emit_structured_standup" {
@@ -136,20 +140,20 @@ Shape content technical level:
 - technical: header, whatWorkedOn bullets, filesChanged {files, additions, deletions}, commits[] (short, conventional commit style).
 	technical should be on the same understanding level as a software engineer it should contain the changes made and how it affected the codebase in regards to improvement and efficieny.
 Convert time stamps into human readable dates.
-Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName and separate the commits summary for the different contributors".`
+Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName and separate the commits summary for the different contributors". Include in the result a title for the standup.`
 	case FormatMildlyTechnical:
 		return `You are AutoStandup's summarizer. Output ONE function call "emit_structured_standup" with JSON that matches the provided schema.
 Shape content mildly-technical level only:
 	Convert time stamps into human readable dates.
 - mildlyTechnical: header, whatWorkedOn bullets, impact, focus.
-Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName".`
+Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName". Include in the result a title for the standup.`
 	case FormatLayman:
 		return `You are AutoStandup's summarizer. Output ONE function call "emit_structured_standup" with JSON that matches the provided schema.
 Shape content layman level only:
 	Convert time stamps into human readable dates.
 
 - layman: header, whatWorkedOn bullets (plain language), impact, focus.
-Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName".`
+Keep it concise, truthful, de-duplicate similar commits, and aggregate. Use the provided handle and projectName in headers like: "📊 **Daily Standup for @handle** – ProjectName". Include in the result a title for the standup.`
 	default:
 		return ""
 	}
@@ -178,6 +182,7 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 				"required": []string{"name", "commits"},
 			},
 		},
+		"title": map[string]any{"type": "string"},
 	}
 
 	var required []string
@@ -186,6 +191,7 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 		baseProps["technical"] = map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"title":  map[string]any{"type": "string"},
 				"header": map[string]any{"type": "string"},
 				"whatWorkedOn": map[string]any{
 					"type":  "array",
@@ -214,14 +220,15 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 					"Code characters deleted": map[string]any{"type": "integer"},
 				},
 			},
-			"required": []string{"header", "filesChanged"},
+			"required": []string{"header", "filesChanged", "title"},
 		}
-		required = []string{"repo", "window", "technical"}
+		required = []string{"repo", "window", "technical", "title"}
 
 	case FormatMildlyTechnical:
 		baseProps["mildlyTechnical"] = map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"title":  map[string]any{"type": "string"},
 				"header": map[string]any{"type": "string"},
 				"whatWorkedOn": map[string]any{
 					"type":  "array",
@@ -230,7 +237,7 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 				"impact": map[string]any{"type": "string"},
 				"focus":  map[string]any{"type": "string"},
 			},
-			"required": []string{"header", "impact", "focus"},
+			"required": []string{"header", "impact", "focus", "title"},
 		}
 		baseProps["changes"] = map[string]any{
 			"type": "object",
@@ -241,12 +248,13 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 				"Code characters deleted": map[string]any{"type": "integer"},
 			},
 		}
-		required = []string{"repo", "window", "mildlyTechnical"}
+		required = []string{"repo", "window", "mildlyTechnical", "title"}
 
 	case FormatLayman:
 		baseProps["layman"] = map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"title":  map[string]any{"type": "string"},
 				"header": map[string]any{"type": "string"},
 				"whatWorkedOn": map[string]any{
 					"type":  "array",
@@ -255,7 +263,7 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 				"impact": map[string]any{"type": "string"},
 				"focus":  map[string]any{"type": "string"},
 			},
-			"required": []string{"header", "impact", "focus"},
+			"required": []string{"header", "impact", "focus", "title"},
 		}
 		baseProps["changes"] = map[string]any{
 			"type": "object",
@@ -266,7 +274,7 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 				"Code characters deleted": map[string]any{"type": "integer"},
 			},
 		}
-		required = []string{"repo", "window", "layman"}
+		required = []string{"repo", "window", "layman", "title"}
 	}
 
 	return openai.FunctionParameters{
@@ -277,6 +285,7 @@ func buildSchema(format FormatType) openai.FunctionParameters {
 }
 
 func pruneOutput(out *StandupPayload, format FormatType) {
+	title := out.Title // Preserve the title before pruning
 	switch format {
 	case FormatTechnical:
 		out.MildlyTechnical = SummaryLevel{}
@@ -292,6 +301,7 @@ func pruneOutput(out *StandupPayload, format FormatType) {
 		out.MildlyTechnical = SummaryLevel{}
 		out.Layman.WhatWorkedOn = pruneEmpty(out.Layman.WhatWorkedOn)
 	}
+	out.Title = title // Restore the title after pruning
 }
 
 func pruneEmpty(in []string) []string {
