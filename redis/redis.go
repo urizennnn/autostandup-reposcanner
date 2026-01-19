@@ -15,8 +15,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type contextKey string
+
 type QueueMessage struct {
 	Owner          string    `json:"owner"`
+	IsTestStandup  bool      `json:"isTestStandup"`
 	Repo           string    `json:"repo"`
 	From           time.Time `json:"from"`
 	To             time.Time `json:"to"`
@@ -162,6 +165,11 @@ func handleAndParseMessageEvent(ctx context.Context, msg redis.XMessage, rdb *re
 	log.Printf("[INFO] processing message %s", msg.ID)
 
 	payload, err := extractAndValidatePayload(msg)
+	isTestStandupFlag := contextKey("isTestStandup")
+	ctx = context.WithValue(ctx, isTestStandupFlag, payload.IsTestStandup)
+	if payload.IsTestStandup {
+		log.Printf("[INFO] test standup received repo=%s/%s", payload.Owner, payload.Repo)
+	}
 	if err != nil {
 		return err
 	}
@@ -182,27 +190,61 @@ func extractAndValidatePayload(msg redis.XMessage) (QueueMessage, error) {
 	return payload, nil
 }
 
-func processRepoScan(ctx context.Context, payload QueueMessage, cfg *config.Config) (ai.StandupPayload, error) {
+func processRepoScan(ctx context.Context, payload QueueMessage, cfg *config.Config) (ai.SummarizeResult, error) {
 	githubPrivateKey, err := config.FetchSecretByName("APP_GITHUB_PRIVATE_KEY")
 	if err != nil {
-		return ai.StandupPayload{}, fmt.Errorf("fetching github private key: %w", err)
+		return ai.SummarizeResult{}, fmt.Errorf("fetching github private key: %w", err)
 	}
 
 	githubClientID, err := config.FetchSecretByName("APP_GITHUB_CLIENT_ID")
 	if err != nil {
-		return ai.StandupPayload{}, fmt.Errorf("fetching github client id: %w", err)
+		return ai.SummarizeResult{}, fmt.Errorf("fetching github client id: %w", err)
 	}
 
 	client, err := github.NewClient(cfg, []byte(githubPrivateKey), githubClientID, payload.InstallationID)
 	if err != nil {
-		return ai.StandupPayload{}, fmt.Errorf("creating github client: %w", err)
+		return ai.SummarizeResult{}, fmt.Errorf("creating github client: %w", err)
 	}
 
 	return client.ListCommits(ctx, payload.Owner, payload.Repo, payload.Branch, payload.Format, payload.From, payload.To)
 }
 
-func publishResult(ctx context.Context, rdb *redis.Client, result ai.StandupPayload, payload QueueMessage, cfg *config.Config) error {
-	payloadBytes, err := json.Marshal(result)
+func publishResult(ctx context.Context, rdb *redis.Client, result ai.SummarizeResult, payload QueueMessage, cfg *config.Config) error {
+	isTestStandupFlag := ctx.Value(contextKey("isTestStandup")).(bool)
+
+	if isTestStandupFlag {
+		testPayload := map[string]any{
+			"payload":       result.Payload,
+			"details":       result.Details,
+			"isTestStandup": true,
+		}
+		testPayloadBytes, err := json.Marshal(testPayload)
+		if err != nil {
+			return fmt.Errorf("marshal test payload: %w", err)
+		}
+		id, err := rdb.XAdd(ctx, &redis.XAddArgs{
+			Stream:     "scan:results",
+			MaxLen:     int64(cfg.RedisStreamMaxLen),
+			Approx:     true,
+			ID:         "*",
+			NoMkStream: false,
+			Values: map[string]any{
+				"payload":       string(testPayloadBytes),
+				"repo":          result.Payload.Repo,
+				"from":          payload.From.UTC().Format(time.RFC3339),
+				"to":            payload.To.UTC().Format(time.RFC3339),
+				"format":        payload.Format,
+				"isTestStandup": true,
+			},
+		}).Result()
+		if err != nil {
+			return fmt.Errorf("publish test to scan:results: %w", err)
+		}
+		log.Printf("[INFO] published test summary id=%s repo=%s/%s", id, payload.Owner, payload.Repo)
+		return nil
+	}
+
+	payloadBytes, err := json.Marshal(result.Payload)
 	if err != nil {
 		return fmt.Errorf("marshal summary payload: %w", err)
 	}
@@ -215,7 +257,7 @@ func publishResult(ctx context.Context, rdb *redis.Client, result ai.StandupPayl
 		NoMkStream: false,
 		Values: map[string]any{
 			"payload": string(payloadBytes),
-			"repo":    result.Repo,
+			"repo":    result.Payload.Repo,
 			"from":    payload.From.UTC().Format(time.RFC3339),
 			"to":      payload.To.UTC().Format(time.RFC3339),
 			"format":  payload.Format,

@@ -59,7 +59,7 @@ func createGithubClient(privateKey []byte, clientID string, installationID int64
 	return client, nil
 }
 
-func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format string, since, until time.Time) (ai.StandupPayload, error) {
+func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format string, since, until time.Time) (ai.SummarizeResult, error) {
 	log.Printf("[INFO] fetching commits %s/%s branch=%s", owner, repo, branch)
 	commits, _, err := c.gh.Repositories.ListCommits(
 		ctx, owner, repo, &github.CommitsListOptions{
@@ -68,12 +68,12 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format st
 			SHA:   branch,
 		})
 	if err != nil {
-		return ai.StandupPayload{}, fmt.Errorf("fetching commits: %w", err)
+		return ai.SummarizeResult{}, fmt.Errorf("fetching commits: %w", err)
 	}
 
 	if len(commits) == 0 {
 		log.Printf("[INFO] no commits found %s/%s", owner, repo)
-		return ai.StandupPayload{}, nil
+		return ai.SummarizeResult{}, nil
 	}
 
 	results := make([]ai.Commit, len(commits))
@@ -117,7 +117,7 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format st
 	}
 
 	if err := g.Wait(); err != nil {
-		return ai.StandupPayload{}, err
+		return ai.SummarizeResult{}, err
 	}
 
 	aiCommits := make([]ai.Commit, 0, len(results))
@@ -129,7 +129,7 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format st
 
 	openaiAPIKey, err := config.FetchSecretByName("APP_OPENAI_API_KEY")
 	if err != nil {
-		return ai.StandupPayload{}, fmt.Errorf("fetching openai api key: %w", err)
+		return ai.SummarizeResult{}, fmt.Errorf("fetching openai api key: %w", err)
 	}
 
 	job := ai.SummarizeJob{

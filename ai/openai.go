@@ -77,12 +77,25 @@ const (
 	FormatLayman          FormatType = "layman"
 )
 
-func Summarize(ctx context.Context, apiKey string, job SummarizeJob, format FormatType) (StandupPayload, error) {
+type UsageDetails struct {
+	Model            string  `json:"model"`
+	PromptTokens     int64   `json:"promptTokens"`
+	CompletionTokens int64   `json:"completionTokens"`
+	TotalTokens      int64   `json:"totalTokens"`
+	EstimatedCost    float64 `json:"estimatedCost"`
+}
+
+type SummarizeResult struct {
+	Payload StandupPayload `json:"payload"`
+	Details UsageDetails   `json:"details"`
+}
+
+func Summarize(ctx context.Context, apiKey string, job SummarizeJob, format FormatType) (SummarizeResult, error) {
 	client := openai.NewClient(option.WithAPIKey(apiKey))
 
 	jobJSON, err := json.Marshal(job)
 	if err != nil {
-		return StandupPayload{}, fmt.Errorf("marshal job: %w", err)
+		return SummarizeResult{}, fmt.Errorf("marshal job: %w", err)
 	}
 
 	tool := openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
@@ -107,29 +120,43 @@ func Summarize(ctx context.Context, apiKey string, job SummarizeJob, format Form
 	resp, err := client.Chat.Completions.New(chatCtx, params)
 	if err != nil {
 		log.Printf("[ERROR] chat completion error: %v", err)
-		return StandupPayload{}, err
+		return SummarizeResult{}, err
 	}
 	if len(resp.Choices) == 0 || len(resp.Choices[0].Message.ToolCalls) == 0 {
-		return StandupPayload{}, fmt.Errorf("model did not return tool call")
+		return SummarizeResult{}, fmt.Errorf("model did not return tool call")
 	}
 	var out StandupPayload
 	for _, tc := range resp.Choices[0].Message.ToolCalls {
 		if tc.Function.Name == "emit_structured_standup" {
 			if err := json.Unmarshal([]byte(tc.Function.Arguments), &out); err != nil {
-				return StandupPayload{}, fmt.Errorf("bad tool args: %w", err)
+				return SummarizeResult{}, fmt.Errorf("bad tool args: %w", err)
 			}
 			break
 		}
 	}
 	if out.Repo == "" {
-		return StandupPayload{}, fmt.Errorf("empty payload")
+		return SummarizeResult{}, fmt.Errorf("empty payload")
 	}
 
 	log.Printf("[INFO] summary generated repo=%s since=%s until=%s contributors=%d format=%s",
 		out.Repo, out.Window.Since, out.Window.Until, len(out.Contributors), format)
 
 	pruneOutput(&out, format)
-	return out, nil
+
+	details := UsageDetails{
+		Model:            string(resp.Model),
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+		EstimatedCost:    calculateCost(resp.Usage.PromptTokens, resp.Usage.CompletionTokens),
+	}
+
+	return SummarizeResult{Payload: out, Details: details}, nil
+}
+
+func calculateCost(promptTokens, completionTokens int64) float64 {
+	// GPT-4o pricing: $2.50/1M input, $10/1M output
+	return (float64(promptTokens) * 2.5 / 1_000_000) + (float64(completionTokens) * 10.0 / 1_000_000)
 }
 
 func getSystemPrompt(format FormatType) string {
