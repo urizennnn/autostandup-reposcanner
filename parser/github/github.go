@@ -17,13 +17,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type Client struct {
-	gh      *github.Client
-	limiter *ratelimit.Limiter
-	cache   *cache.Cache
-	config  *config.Config
-}
-
 func NewClient(cfg *config.Config, privateKey []byte, clientID string, installationID int64) (*Client, error) {
 	limiter := ratelimit.New(cfg.GithubRateLimit, cfg.OpenaiRateLimit)
 	c, err := cache.New(cfg.CacheSize)
@@ -155,12 +148,6 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format st
 	}
 
 	return ai.Summarize(ctx, openaiAPIKey, job, formatType)
-}
-
-type commitStats struct {
-	Files     int
-	Additions int
-	Deletions int
 }
 
 func (c *Client) getCommitStats(ctx context.Context, owner, repo, sha string) (files int, additions int, deletions int, err error) {

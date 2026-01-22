@@ -15,19 +15,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type contextKey string
-
-type QueueMessage struct {
-	Owner          string    `json:"owner"`
-	IsTestStandup  bool      `json:"isTestStandup"`
-	Repo           string    `json:"repo"`
-	From           time.Time `json:"from"`
-	To             time.Time `json:"to"`
-	InstallationID int64     `json:"installation_id"`
-	Branch         string    `json:"branch"`
-	Format         string    `json:"format"`
-}
-
 func ConnectToRedisURL(url string, connTimeout time.Duration) (*redis.Client, error) {
 	opts, err := redis.ParseURL(url)
 	if err != nil {
