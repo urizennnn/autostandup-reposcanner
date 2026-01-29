@@ -19,6 +19,7 @@ import (
 
 func NewClient(cfg *config.Config, privateKey []byte, clientID string, installationID int64) (*Client, error) {
 	limiter := ratelimit.New(cfg.GithubRateLimit, cfg.OpenaiRateLimit)
+
 	c, err := cache.New(cfg.CacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("creating cache: %w", err)
@@ -39,37 +40,51 @@ func NewClient(cfg *config.Config, privateKey []byte, clientID string, installat
 
 func createGithubClient(privateKey []byte, clientID string, installationID int64, timeout time.Duration) (*github.Client, error) {
 	log.Printf("[INFO] creating github client for installation %d", installationID)
+
 	appTokenSource, err := githubauth.NewApplicationTokenSource(clientID, privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("creating github client: %w", err)
 	}
+
 	installationTokenSource := githubauth.NewInstallationTokenSource(installationID, appTokenSource)
 
 	baseClient := oauth2.NewClient(context.Background(), installationTokenSource)
 	baseClient.Timeout = timeout
 
-	client := github.NewClient(baseClient)
-	return client, nil
+	return github.NewClient(baseClient), nil
 }
 
-func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format string, since, until time.Time) (ai.SummarizeResult, error) {
+func (c *Client) ListCommits(
+	ctx context.Context,
+	owner string,
+	repo string,
+	branch string,
+	format string,
+	since time.Time,
+	until time.Time,
+) (ai.SummarizeResult, error) {
 	log.Printf("[INFO] fetching commits %s/%s branch=%s", owner, repo, branch)
+
 	commits, _, err := c.gh.Repositories.ListCommits(
-		ctx, owner, repo, &github.CommitsListOptions{
+		ctx,
+		owner,
+		repo,
+		&github.CommitsListOptions{
 			Since: since,
 			Until: until,
 			SHA:   branch,
-		})
+		},
+	)
 	if err != nil {
 		return ai.SummarizeResult{}, fmt.Errorf("fetching commits: %w", err)
 	}
 
 	if len(commits) == 0 {
-		log.Printf("[INFO] no commits found %s/%s", owner, repo)
 		return ai.SummarizeResult{}, nil
 	}
 
 	results := make([]ai.Commit, len(commits))
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(c.config.GithubConcurrency)
 
@@ -77,18 +92,25 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format st
 		if commit == nil {
 			continue
 		}
-		i, commit := i, commit
+
+		i := i
+		commit := commit
+
 		g.Go(func() error {
 			sha := commit.GetSHA()
-			name := commit.GetCommit().GetAuthor().GetName()
-			email := commit.GetCommit().GetAuthor().GetEmail()
-			if email == "" {
-				email = commit.GetCommit().GetCommitter().GetEmail()
-			}
+
+			author := commit.GetCommit().GetAuthor()
+			committer := commit.GetCommit().GetCommitter()
+
+			name := author.GetName()
+			email := author.GetEmail()
+
 			if name == "" {
-				name = commit.GetCommit().GetCommitter().GetName()
+				name = committer.GetName()
 			}
-			msg := commit.GetCommit().GetMessage()
+			if email == "" {
+				email = committer.GetEmail()
+			}
 
 			files, adds, dels, err := c.getCommitStats(ctx, owner, repo, sha)
 			if err != nil {
@@ -100,11 +122,12 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format st
 				SHA:         sha,
 				AuthorName:  name,
 				AuthorEmail: email,
-				Message:     msg,
+				Message:     commit.GetCommit().GetMessage(),
 				Files:       files,
 				Additions:   adds,
 				Deletions:   dels,
 			}
+
 			return nil
 		})
 	}
@@ -129,28 +152,37 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, branch, format st
 		Repo:        owner + "/" + repo,
 		ProjectName: repo,
 		Handle:      owner,
-		Since:       since.UTC(),
-		Until:       until.UTC(),
-		Commits:     aiCommits,
+		Window: ai.TimeWindow{
+			Since: since.UTC(),
+			Until: until.UTC(),
+		},
+		Commits: aiCommits,
 	}
 
-	var formatType ai.FormatType
-	switch strings.ToUpper(strings.ReplaceAll(format, "-", "_")) {
-	case "TECHNICAL":
-		formatType = ai.FormatTechnical
-	case "MILDLY_TECHNICAL":
-		formatType = ai.FormatMildlyTechnical
-	case "LAYMAN":
-		formatType = ai.FormatLayman
-	default:
-		log.Printf("[WARN] unknown format: %s, defaulting to technical", format)
-		formatType = ai.FormatTechnical
-	}
+	formatType := normalizeFormat(format)
 
 	return ai.Summarize(ctx, openaiAPIKey, job, formatType)
 }
 
-func (c *Client) getCommitStats(ctx context.Context, owner, repo, sha string) (files int, additions int, deletions int, err error) {
+func normalizeFormat(format string) ai.StandupFormat {
+	switch strings.ToUpper(strings.ReplaceAll(format, "-", "_")) {
+	case "LAYMAN":
+		return ai.FormatLayman
+	case "MILDLY_TECHNICAL":
+		return ai.FormatMildlyTechnical
+	case "TECHNICAL":
+		return ai.FormatTechnical
+	default:
+		return ai.FormatTechnical
+	}
+}
+
+func (c *Client) getCommitStats(
+	ctx context.Context,
+	owner string,
+	repo string,
+	sha string,
+) (int, int, int, error) {
 	cacheKey := fmt.Sprintf("commit:%s:%s:%s", owner, repo, sha)
 
 	if cached, ok := c.cache.Get(cacheKey); ok {
@@ -162,7 +194,13 @@ func (c *Client) getCommitStats(ctx context.Context, owner, repo, sha string) (f
 		return 0, 0, 0, err
 	}
 
-	commit, _, err := c.gh.Repositories.GetCommit(ctx, owner, repo, sha, &github.ListOptions{})
+	commit, _, err := c.gh.Repositories.GetCommit(
+		ctx,
+		owner,
+		repo,
+		sha,
+		&github.ListOptions{},
+	)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -178,5 +216,6 @@ func (c *Client) getCommitStats(ctx context.Context, owner, repo, sha string) (f
 	}
 
 	c.cache.Set(cacheKey, stats, time.Hour)
+
 	return stats.Files, stats.Additions, stats.Deletions, nil
 }

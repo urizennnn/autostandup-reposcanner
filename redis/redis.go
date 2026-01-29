@@ -202,7 +202,7 @@ func publishResult(ctx context.Context, rdb *redis.Client, result ai.SummarizeRe
 	if isTestStandupFlag {
 		testPayload := map[string]any{
 			"payload":       result.Payload,
-			"details":       result.Details,
+			"details":       result.Usage,
 			"isTestStandup": true,
 		}
 		testPayloadBytes, err := json.Marshal(testPayload)

@@ -4,21 +4,32 @@ import "time"
 
 type Commit struct {
 	SHA         string `json:"sha"`
-	AuthorName  string `json:"authorName"`
-	AuthorEmail string `json:"authorEmail"`
 	Message     string `json:"message"`
+	AuthorName  string `json:"authorName"`
+	AuthorEmail string `json:"authorEmail,omitempty"`
 	Files       int    `json:"files"`
 	Additions   int    `json:"additions"`
 	Deletions   int    `json:"deletions"`
 }
 
+type TimeWindow struct {
+	Since time.Time `json:"since"`
+	Until time.Time `json:"until"`
+}
+
 type SummarizeJob struct {
-	Repo        string    `json:"repo"`
-	ProjectName string    `json:"projectName"`
-	Handle      string    `json:"handle"`
-	Since       time.Time `json:"since"`
-	Until       time.Time `json:"until"`
-	Commits     []Commit  `json:"commits"`
+	Repo        string     `json:"repo"`
+	ProjectName string     `json:"projectName"`
+	Handle      string     `json:"handle"`
+	Window      TimeWindow `json:"window"`
+	Commits     []Commit   `json:"commits"`
+}
+
+type ActivityMetrics struct {
+	FilesChanged int      `json:"filesChanged"`
+	Additions    int      `json:"additions"`
+	Deletions    int      `json:"deletions"`
+	Commits      []string `json:"commits,omitempty"`
 }
 
 type Contributor struct {
@@ -27,46 +38,36 @@ type Contributor struct {
 	Commits int    `json:"commits"`
 }
 
-type FilesChanged struct {
-	Files     int `json:"files"`
-	Additions int `json:"additions"`
-	Deletions int `json:"deletions"`
-}
-
-type TechnicalLevel struct {
-	Header       string       `json:"header"`
-	WhatWorkedOn []string     `json:"whatWorkedOn,omitempty"`
-	FilesChanged FilesChanged `json:"filesChanged"`
-	Commits      []string     `json:"commits,omitempty"`
-}
-
-type SummaryLevel struct {
-	Header       string   `json:"header"`
-	WhatWorkedOn []string `json:"whatWorkedOn,omitempty"`
-	Impact       string   `json:"impact"`
-	Focus        string   `json:"focus"`
+type CanonicalSummary struct {
+	Title      string   `json:"title"`
+	Highlights []string `json:"highlights"`
+	KeyChanges []string `json:"keyChanges"`
+	Impact     string   `json:"impact"`
+	NextFocus  string   `json:"nextFocus"`
 }
 
 type StandupPayload struct {
-	Repo   string `json:"repo"`
-	Title  string `json:"title"`
-	Window struct {
-		Since string `json:"since"`
-		Until string `json:"until"`
-	} `json:"window"`
-	Technical       TechnicalLevel `json:"technical"`
-	MildlyTechnical SummaryLevel   `json:"mildlyTechnical"`
-	Layman          SummaryLevel   `json:"layman"`
-	Contributors    []Contributor  `json:"contributors,omitempty"`
+	Repo         string           `json:"repo"`
+	ProjectName  string           `json:"projectName"`
+	Window       TimeWindow       `json:"window"`
+	Summary      CanonicalSummary `json:"summary"`
+	Metrics      ActivityMetrics  `json:"metrics"`
+	Contributors []Contributor    `json:"contributors,omitempty"`
 }
 
-type FormatType string
+type StandupFormat string
 
 const (
-	FormatTechnical       FormatType = "technical"
-	FormatMildlyTechnical FormatType = "mildly_technical"
-	FormatLayman          FormatType = "layman"
+	FormatTechnical       StandupFormat = "technical"
+	FormatMildlyTechnical StandupFormat = "mildly_technical"
+	FormatLayman          StandupFormat = "layman"
 )
+
+type RenderedStandup struct {
+	Format StandupFormat `json:"format"`
+	Text   string        `json:"text"`
+	Blocks any           `json:"blocks,omitempty"`
+}
 
 type UsageDetails struct {
 	Model            string  `json:"model"`
@@ -78,5 +79,5 @@ type UsageDetails struct {
 
 type SummarizeResult struct {
 	Payload StandupPayload `json:"payload"`
-	Details UsageDetails   `json:"details"`
+	Usage   UsageDetails   `json:"usage"`
 }
