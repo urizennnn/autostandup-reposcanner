@@ -1,6 +1,9 @@
 package ai
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Commit struct {
 	SHA         string `json:"sha"`
@@ -38,21 +41,34 @@ type Contributor struct {
 	Commits int    `json:"commits"`
 }
 
-type CanonicalSummary struct {
-	Title      string   `json:"title"`
-	Highlights []string `json:"highlights"`
-	KeyChanges []string `json:"keyChanges"`
-	Impact     string   `json:"impact"`
-	NextFocus  string   `json:"nextFocus"`
+type TechnicalSummary struct {
+	Overview         string   `json:"overview"`
+	Accomplishments  []string `json:"accomplishments"`
+	TechnicalDetails []string `json:"technicalDetails"`
+	CodeImpact       string   `json:"codeImpact"`
+}
+
+type MildlyTechnicalSummary struct {
+	Overview        string   `json:"overview"`
+	Accomplishments []string `json:"accomplishments"`
+	Changes         []string `json:"changes"`
+	Impact          string   `json:"impact"`
+}
+
+type LaymanSummary struct {
+	Overview        string   `json:"overview"`
+	Accomplishments []string `json:"accomplishments"`
+	Achievements    []string `json:"achievements"`
+	BusinessValue   string   `json:"businessValue"`
 }
 
 type StandupPayload struct {
-	Repo         string           `json:"repo"`
-	ProjectName  string           `json:"projectName"`
-	Window       TimeWindow       `json:"window"`
-	Summary      CanonicalSummary `json:"summary"`
-	Metrics      ActivityMetrics  `json:"metrics"`
-	Contributors []Contributor    `json:"contributors,omitempty"`
+	Repo         string          `json:"repo"`
+	ProjectName  string          `json:"projectName"`
+	Window       TimeWindow      `json:"window"`
+	Summary      json.RawMessage `json:"summary"`
+	Metrics      ActivityMetrics `json:"metrics"`
+	Contributors []Contributor   `json:"contributors,omitempty"`
 }
 
 type StandupFormat string

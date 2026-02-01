@@ -21,7 +21,7 @@ func Summarize(ctx context.Context, apiKey string, job SummarizeJob, format Stan
 
 	tool := openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
 		Name:       "emit_structured_standup",
-		Parameters: buildSchema(),
+		Parameters: buildSchema(format),
 	})
 
 	params := openai.ChatCompletionNewParams{
@@ -93,80 +93,123 @@ func systemPrompt(format StandupFormat) string {
 Return ONE function call named "emit_structured_standup".
 Return valid JSON matching the provided schema exactly.
 Aggregate commits truthfully. Deduplicate similar work.
-Convert timestamps to RFC3339.`
+Convert timestamps to RFC3339.
+Generate Monday standup focusing on accomplishments (past tense), not future plans.`
 
 	switch format {
 	case FormatTechnical:
 		return base + `
-Tone: technical.
-Focus on architecture, refactors, performance, and code-level impact.`
+Focus: accomplishments, architecture, refactors, code impact.
+Use technical terminology.`
 
 	case FormatMildlyTechnical:
 		return base + `
-Tone: mildly technical.
-Explain changes clearly without deep implementation detail.`
+Focus: accomplishments, features built, fixes made.
+Clear terms, no deep detail.`
 
 	case FormatLayman:
 		return base + `
-Tone: layman.
-Use plain language. No engineering jargon.`
+Focus: accomplishments, features delivered, business value.
+Plain language only.`
 
 	default:
 		return base
 	}
 }
 
-func buildSchema() openai.FunctionParameters {
-	return openai.FunctionParameters{
-		"type": "object",
-		"properties": map[string]any{
-			"repo":        map[string]any{"type": "string"},
-			"projectName": map[string]any{"type": "string"},
-			"window": map[string]any{
+func buildSchema(format StandupFormat) openai.FunctionParameters {
+	baseProps := map[string]any{
+		"repo":        map[string]any{"type": "string"},
+		"projectName": map[string]any{"type": "string"},
+		"window": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"since": map[string]any{"type": "string", "format": "date-time"},
+				"until": map[string]any{"type": "string", "format": "date-time"},
+			},
+			"required": []string{"since", "until"},
+		},
+		"metrics": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"filesChanged": map[string]any{"type": "integer"},
+				"additions":    map[string]any{"type": "integer"},
+				"deletions":    map[string]any{"type": "integer"},
+				"commits": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+			},
+			"required": []string{"filesChanged", "additions", "deletions"},
+		},
+		"contributors": map[string]any{
+			"type": "array",
+			"items": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"since": map[string]any{"type": "string", "format": "date-time"},
-					"until": map[string]any{"type": "string", "format": "date-time"},
+					"name":    map[string]any{"type": "string"},
+					"email":   map[string]any{"type": "string"},
+					"commits": map[string]any{"type": "integer"},
 				},
-				"required": []string{"since", "until"},
-			},
-			"summary": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"title":      map[string]any{"type": "string"},
-					"highlights": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"keyChanges": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"impact":     map[string]any{"type": "string"},
-					"nextFocus":  map[string]any{"type": "string"},
-				},
-				"required": []string{"title", "highlights", "keyChanges", "impact", "nextFocus"},
-			},
-			"metrics": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"filesChanged": map[string]any{"type": "integer"},
-					"additions":    map[string]any{"type": "integer"},
-					"deletions":    map[string]any{"type": "integer"},
-					"commits": map[string]any{
-						"type":  "array",
-						"items": map[string]any{"type": "string"},
-					},
-				},
-				"required": []string{"filesChanged", "additions", "deletions"},
-			},
-			"contributors": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"name":    map[string]any{"type": "string"},
-						"email":   map[string]any{"type": "string"},
-						"commits": map[string]any{"type": "integer"},
-					},
-					"required": []string{"name", "commits"},
-				},
+				"required": []string{"name", "commits"},
 			},
 		},
+	}
+
+	var summarySchema map[string]any
+	switch format {
+	case FormatTechnical:
+		summarySchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"overview":         map[string]any{"type": "string"},
+				"accomplishments":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"technicalDetails": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"codeImpact":       map[string]any{"type": "string"},
+			},
+			"required": []string{"overview", "accomplishments", "technicalDetails", "codeImpact"},
+		}
+
+	case FormatMildlyTechnical:
+		summarySchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"overview":        map[string]any{"type": "string"},
+				"accomplishments": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"changes":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"impact":          map[string]any{"type": "string"},
+			},
+			"required": []string{"overview", "accomplishments", "changes", "impact"},
+		}
+
+	case FormatLayman:
+		summarySchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"overview":        map[string]any{"type": "string"},
+				"accomplishments": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"achievements":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"businessValue":   map[string]any{"type": "string"},
+			},
+			"required": []string{"overview", "accomplishments", "achievements", "businessValue"},
+		}
+
+	default:
+		summarySchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"overview":        map[string]any{"type": "string"},
+				"accomplishments": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+			"required": []string{"overview", "accomplishments"},
+		}
+	}
+
+	baseProps["summary"] = summarySchema
+
+	return openai.FunctionParameters{
+		"type":       "object",
+		"properties": baseProps,
 		"required": []string{
 			"repo",
 			"projectName",
